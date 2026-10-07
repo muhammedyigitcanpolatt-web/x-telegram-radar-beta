@@ -23,6 +23,8 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-dev.lock
+      - name: Check production and test dependency locks agree
+        run: python check_dependency_locks.py
       - name: Install hash-pinned runtime dependencies
         run: python -m pip install --require-hashes -r requirements.txt
       - name: Install hash-pinned test dependencies

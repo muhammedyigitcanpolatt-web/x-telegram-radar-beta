@@ -35,7 +35,7 @@ The supported Chrome extension is in [`extension/`](extension/). [`chrome_extens
 
 ## Development and verification
 
-- Backend dependencies are pinned with hashes in `requirements.txt`; the container installs from that file. `requirements.lock` remains a compatibility alias.
+- Backend dependencies are pinned with hashes in `requirements.txt`; the container installs from that file. `requirements.lock` remains a compatibility alias. CI checks that the development lock uses the same production package versions.
 - See [frontend/README.md](frontend/README.md) for frontend setup.
 - Local fixture tests: `./.venv/bin/python -m pytest tests -q` and `node --test extension/tests/*.test.cjs` when their dependencies are installed.
 - See [DEPLOY.md](DEPLOY.md) for deployment checks, migration steps, and verification limits.
