@@ -1,0 +1,212 @@
+# One supported deployment: Docker Compose on bridge networks, no Swarm.
+name: shortmox-radar
+
+x-backend-environment: &backend-environment
+  POSTGRES_HOST: postgres_db
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: ${POSTGRES_DB:-shortmox_radar}
+  POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the selected env file}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the selected env file}
+  REDIS_URL: redis://redis_queue:6379/0
+  RADAR_SESSION_SECRET: ${RADAR_SESSION_SECRET:?Set a random session secret of at least 32 characters}
+  RADAR_USERS_JSON: ${RADAR_USERS_JSON:?Set the authenticated user/password-hash JSON array}
+  RADAR_INGEST_API_KEY: ${RADAR_INGEST_API_KEY:?Set the server-only ingest key}
+  RADAR_COOKIE_SECURE: ${RADAR_COOKIE_SECURE:-false}
+  RADAR_ALLOWED_ORIGINS: ${RADAR_ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+  COLLECTION_ENABLED: ${COLLECTION_ENABLED:-false}
+  COLLECTION_MAX_RESULTS: ${COLLECTION_MAX_RESULTS:-25}
+  COLLECTION_MAX_X_PAGES: ${COLLECTION_MAX_X_PAGES:-5}
+  COLLECTION_MAX_TELEGRAM_MESSAGES: ${COLLECTION_MAX_TELEGRAM_MESSAGES:-100}
+  X_COLLECTION_PROVIDER: ${X_COLLECTION_PROVIDER:-scraping}
+  X_SCRAPING_CREDENTIAL_SOURCE: ${X_SCRAPING_CREDENTIAL_SOURCE:-env}
+  X_PROXY_SOURCE: ${X_PROXY_SOURCE:-env}
+  X_AUTH_TOKEN: ${X_AUTH_TOKEN:-}
+  X_CT0: ${X_CT0:-}
+  X_GRAPHQL_BEARER_TOKEN: ${X_GRAPHQL_BEARER_TOKEN:-}
+  X_PROXY_URL: ${X_PROXY_URL:-}
+  X_BEARER_TOKEN: ${X_BEARER_TOKEN:-}
+  TELEGRAM_API_ID: ${TELEGRAM_API_ID:-0}
+  TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+  TELEGRAM_COLLECTION_BOT_TOKEN: ${TELEGRAM_COLLECTION_BOT_TOKEN:-}
+  TELEGRAM_SESSION_STRING: ${TELEGRAM_SESSION_STRING:-}
+  TELEGRAM_TARGET_CHANNELS: ${TELEGRAM_TARGET_CHANNELS:-}
+  BACKEND_INGEST_URL: http://fastapi_api:8005/api/v1/ingest
+  NEO4J_URI: bolt://neo4j_graph:7687
+  NEO4J_USER: neo4j
+  NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Set NEO4J_PASSWORD}
+  CLICKHOUSE_URL: http://radar_archive:${CLICKHOUSE_PASSWORD:?Set a hexadecimal CLICKHOUSE_PASSWORD}@clickhouse_lake:8123/
+  # No model server is started automatically. Configure an authorized endpoint explicitly.
+  OLLAMA_URL: ${OLLAMA_URL:-http://127.0.0.1:11434}
+  SIEM_EXPORT_ENABLED: ${SIEM_EXPORT_ENABLED:-false}
+  SIEM_WEBHOOK_URL: ${SIEM_WEBHOOK_URL:-}
+  PUBLIC_CHAIN_LOOKUPS_ENABLED: ${PUBLIC_CHAIN_LOOKUPS_ENABLED:-false}
+
+x-backend-service: &backend-service
+  image: shortmox-radar-api:local
+  build:
+    context: .
+    dockerfile: Dockerfile
+  environment: *backend-environment
+  restart: unless-stopped
+  init: true
+  networks: [data, application]
+  depends_on:
+    postgres_db: {condition: service_healthy}
+    redis_queue: {condition: service_healthy}
+    neo4j_graph: {condition: service_healthy}
+    clickhouse_lake: {condition: service_healthy}
+
+services:
+  postgres_db:
+    image: pgvector/pgvector:0.8.7-pg16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-shortmox_radar}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    networks: [data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis_queue:
+    image: redis:7.4.11-alpine
+    restart: unless-stopped
+    command: [redis-server, --appendonly, "yes", --maxmemory-policy, noeviction]
+    volumes: [redis_data:/data]
+    networks: [data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  neo4j_graph:
+    image: neo4j:5.26.31
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD}
+      NEO4J_server_memory_heap_initial__size: 256m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 256m
+    volumes: [neo4j_data:/data]
+    networks: [data]
+    healthcheck:
+      test: [CMD-SHELL, 'cypher-shell -u neo4j -p "$${NEO4J_AUTH#neo4j/}" "RETURN 1" >/dev/null']
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+
+  clickhouse_lake:
+    image: clickhouse/clickhouse-server:25.8
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: radar_archive
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?Set a hexadecimal CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DB: shortmox_cold_lake
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./app/intel/clickhouse_init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks: [data]
+    ulimits:
+      nofile: {soft: 262144, hard: 262144}
+    healthcheck:
+      test: [CMD-SHELL, 'clickhouse-client --user "$${CLICKHOUSE_USER}" --password "$${CLICKHOUSE_PASSWORD}" --query "SELECT 1" >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  fastapi_api:
+    <<: *backend-service
+    command: [uvicorn, app.main:app, --host, 0.0.0.0, --port, "8005", --workers, "1"]
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8005/health/ready", timeout=3).read()']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  analyzer:
+    <<: *backend-service
+    # Single consumer: startup recovers unacknowledged records from its queue.
+    command: [python, -m, app.workers.analyzer]
+    depends_on:
+      fastapi_api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, 'import os, redis; r=redis.Redis.from_url(os.environ["REDIS_URL"], socket_timeout=3, decode_responses=True); state=r.get("radar:analyzer:state"); raise SystemExit(0 if state in {"RUNNING", "PROCESSING", "PAUSED"} else 1)']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  frontend:
+    image: shortmox-radar-frontend:local
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        RADAR_API_URL: http://fastapi_api:8005
+        NEXT_PUBLIC_MAPBOX_TOKEN: ${NEXT_PUBLIC_MAPBOX_TOKEN:-}
+    environment:
+      RADAR_API_URL: http://fastapi_api:8005
+    restart: unless-stopped
+    init: true
+    networks: [application]
+    depends_on:
+      fastapi_api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, node, -e, 'fetch("http://127.0.0.1:3000/").then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  gateway:
+    image: nginx:1.30.5-alpine
+    restart: unless-stopped
+    ports: ["127.0.0.1:8080:8080"]
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks: [application]
+    depends_on:
+      fastapi_api: {condition: service_healthy}
+      frontend: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O /dev/null http://127.0.0.1:8080/healthz']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  celery_light_ops:
+    <<: *backend-service
+    profiles: [workers]
+    command: [celery, -A, app.workers.celery_app, worker, -Q, "celery,light_ops", --loglevel=info, --concurrency=2, --hostname=light@%h]
+
+  celery_heavy_ai:
+    <<: *backend-service
+    profiles: [workers]
+    command: [celery, -A, app.workers.celery_app, worker, -Q, heavy_ai, --loglevel=info, --concurrency=1, --hostname=heavy@%h]
+
+  celery_beat:
+    <<: *backend-service
+    profiles: [scheduler]
+    command: [celery, -A, app.workers.celery_app, beat, --loglevel=info, --schedule=/tmp/celerybeat-schedule]
+
+volumes:
+  postgres_data:
+  redis_data:
+  neo4j_data:
+  clickhouse_data:
+
+networks:
+  data:
+    driver: bridge
+    internal: true
+  application:
+    driver: bridge

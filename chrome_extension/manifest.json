@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "Shortmox Signal Radar — Legacy Version",
+  "version": "1.0.1",
+  "description": "This version is inactive. Load the extension directory for the supported version.",
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

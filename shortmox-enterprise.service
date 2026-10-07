@@ -1,0 +1,19 @@
+# OPTIONAL Linux wrapper. Copy the project deliberately; no automatic host installation.
+# Edit WorkingDirectory and executable path for the deployment machine before enabling.
+[Unit]
+Description=Shortmox Radar Docker Compose stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/shortmox_enterprise
+ExecStart=/bin/bash /opt/shortmox_enterprise/deploy.sh up
+ExecStop=/bin/bash /opt/shortmox_enterprise/deploy.sh stop
+TimeoutStartSec=1800
+TimeoutStopSec=180
+
+[Install]
+WantedBy=multi-user.target

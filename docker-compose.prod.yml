@@ -1,0 +1,5 @@
+# Compatibility entry point: same stack, not a second deployment definition.
+# Docker Compose >=2.20. Local HTTP defaults; set production HTTPS values in .env.
+name: shortmox-radar
+include:
+  - path: docker-compose.yml

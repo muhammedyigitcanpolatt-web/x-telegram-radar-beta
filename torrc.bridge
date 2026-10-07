@@ -1,0 +1,17 @@
+# Optional Tor bridge template. Docker Compose does not use this file.
+# Obtain current obfs4 bridge details from the Tor Project or an authorized provider.
+# No example or fabricated bridge credentials are stored here.
+#
+# Tor installation and bridge setup are separate operational steps.
+# Enable these lines in your own torrc only after validating the real bridge
+# details and the obfs4proxy installation.
+#
+# UseBridges 1
+# ClientTransportPlugin obfs4 exec /usr/bin/obfs4proxy
+# Bridge obfs4 <host>:<port> <fingerprint> cert=<certificate> iat-mode=0
+#
+# If needed, bind the control port to loopback only. Generate the control
+# password with `tor --hash-password` and store it in a protected local torrc.
+# ControlPort 127.0.0.1:9051
+# HashedControlPassword <generated-hash>
+# SocksPort 127.0.0.1:9050

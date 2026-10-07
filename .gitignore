@@ -1,0 +1,40 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+secrets.json
+secrets/
+*.pem
+*.key
+*.session
+*.session-journal
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Node.js
+node_modules/
+dist/
+build/
+.next/
+*.tsbuildinfo
+
+# Local Codex audit and transfer notes
+.codex-handoff/
+
+# Docker
+.env.local
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/

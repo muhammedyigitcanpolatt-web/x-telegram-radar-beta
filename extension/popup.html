@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shortmox Radar — Public Beta</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="header">
+    <img src="icons/icon48.png" alt="Radar" />
+    <h1>SHORTMOX RADAR</h1>
+    <div id="connection-status" class="status-dot" title="Connection status"></div>
+  </div>
+
+  <div class="controls">
+    <span class="secure-token-label">DASHBOARD ALERTS</span>
+    <button id="clear-btn" class="btn-secondary">Clear</button>
+  </div>
+
+  <ul id="alert-list" class="alert-list">
+    <li class="empty">Waiting for radar alerts...</li>
+  </ul>
+
+  <script src="popup.js"></script>
+</body>
+</html>
