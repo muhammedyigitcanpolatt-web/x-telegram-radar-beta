@@ -7,7 +7,7 @@ Local access: **http://127.0.0.1:8080** or **http://localhost:8080**. The gatewa
 ## Requirements and version contract
 
 - Docker Engine/Desktop and Docker Compose **v2.20+**. Both `docker compose version` and `docker info` must work. The deployment script does not install Docker, start its service, or change the firewall.
-- Backend: Python 3.12 and the backend maintainer's **requirements.lock**. The Dockerfile installs only from this lockfile; a missing lockfile stops the build. `requirements.txt` alone is insufficient.
+- Backend: Python 3.12 and the backend maintainer's hash-pinned **requirements.txt**. The Dockerfile installs only from this lockfile; a missing lockfile stops the build. `requirements.lock` is a compatibility alias.
 - Frontend: Node 24 and Next **15.5.27** from `package-lock.json`. The build runs `npm ci` followed by `next build`. `RADAR_API_URL=http://fastapi_api:8005` is a server-side build argument. Optional `NEXT_PUBLIC_MAPBOX_TOKEN` is embedded in browser code at build time; use only a public Mapbox token there and never put secrets in build arguments.
 - Data is stored in named volumes. PostgreSQL and ClickHouse schemas are initialized on a fresh installation. Do not automatically move or delete volumes from an older installation; see the upgrade section below.
 
@@ -90,7 +90,7 @@ bash deploy.sh status
 
 To use another environment file: `RADAR_ENV_FILE=/absolute/path/.env bash deploy.sh up`. `up` builds first, waits with Compose `--wait`, then checks frontend and API HTTP access through the gateway. Failures return a nonzero status. `check` only validates configuration and starts no services. Plain `docker compose config` output may reveal secrets; use `config --quiet` for validation.
 
-Ready and HTTP-reachable do not prove live-account collection, AI accuracy, or end-to-end archive transfer. Sign in and separately verify an authorized sample data flow. `check` validates Compose configuration only; the API validates origin, cookie, and ingest-key security settings when the service starts.
+Ready and HTTP-reachable do not prove live-account collection, AI accuracy, or end-to-end archive transfer. Sign in and separately verify an authorized sample data flow. `check` validates Compose configuration only; the gateway and API validate edge, origin, cookie, and ingest-key security settings when their services start.
 
 Logs and stop:
 

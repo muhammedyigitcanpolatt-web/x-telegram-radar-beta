@@ -24,12 +24,12 @@ docker compose version >/dev/null
 case "$ACTION" in
   check)
     printf 'Compose syntax and required interpolation are valid; services have not been started.\n'
-    printf 'Application security settings are checked at API startup, not by this command.\n'
+    printf 'Application security settings are checked at gateway and API startup, not by this command.\n'
     ;;
   up)
     docker info >/dev/null
-    if [[ ! -s requirements.lock ]]; then
-      printf 'requirements.lock was not found; the backend will not build without its dependency lockfile.\n' >&2
+    if [[ ! -s requirements.txt ]]; then
+      printf 'requirements.txt was not found; the backend will not build without its hash-pinned dependency lockfile.\n' >&2
       exit 2
     fi
     "${COMPOSE[@]}" build

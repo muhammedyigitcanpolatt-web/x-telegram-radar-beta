@@ -20,8 +20,12 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements-dev.lock
-      - name: Install locked dependencies
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.lock
+      - name: Install hash-pinned runtime dependencies
+        run: python -m pip install --require-hashes -r requirements.txt
+      - name: Install hash-pinned test dependencies
         run: python -m pip install --require-hashes -r requirements-dev.lock
       - name: Test backend
         run: python -m pytest tests -q

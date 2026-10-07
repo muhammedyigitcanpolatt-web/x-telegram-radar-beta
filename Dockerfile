@@ -6,9 +6,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 # Maintained by the backend dependency owner; no floating requirements fallback.
-COPY requirements.lock ./requirements.lock
+COPY requirements.txt ./requirements.txt
 RUN python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --require-hashes -r requirements.lock
+    && /opt/venv/bin/pip install --require-hashes -r requirements.txt
 
 FROM ${PYTHON_IMAGE} AS runtime
 ENV PATH="/opt/venv/bin:$PATH" PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
