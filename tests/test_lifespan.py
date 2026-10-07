@@ -342,6 +342,50 @@ def test_ingest_service_key_is_required_at_startup():
         validate_required_settings(config)
 
 
+def test_ingest_service_key_requires_at_least_32_characters():
+    config = Settings(
+        _env_file=None,
+        POSTGRES_PASSWORD="fixture-password",
+        RADAR_SESSION_SECRET="fixture-session-secret-" + "x" * 32,
+        RADAR_INGEST_API_KEY="short-key",
+        RADAR_COOKIE_SECURE=False,
+    )
+    with pytest.raises(RuntimeError, match="RADAR_INGEST_API_KEY"):
+        validate_required_settings(config)
+
+
+@pytest.mark.parametrize(
+    ("origin", "secure", "error"),
+    [
+        ("http://localhost:8080,http://127.0.0.1:8080", False, None),
+        ("https://radar.example.com", True, None),
+        ("https://radar.example.com", False, "RADAR_COOKIE_SECURE"),
+        ("http://radar.example.com", False, "RADAR_ALLOWED_ORIGINS"),
+        (
+            "https://radar.example.com,http://localhost:8080",
+            True,
+            "RADAR_ALLOWED_ORIGINS",
+        ),
+        ("https://radar.example.com/path", True, "RADAR_ALLOWED_ORIGINS"),
+        ("HTTPS://radar.example.com", True, "RADAR_ALLOWED_ORIGINS"),
+    ],
+)
+def test_browser_origin_and_cookie_deployment_settings(origin, secure, error):
+    config = Settings(
+        _env_file=None,
+        POSTGRES_PASSWORD="fixture-password",
+        RADAR_SESSION_SECRET="fixture-session-secret-" + "x" * 32,
+        RADAR_INGEST_API_KEY="fixture-ingest-key-" + "x" * 32,
+        RADAR_COOKIE_SECURE=secure,
+        RADAR_ALLOWED_ORIGINS=origin,
+    )
+    if error is None:
+        validate_required_settings(config)
+    else:
+        with pytest.raises(RuntimeError, match=error):
+            validate_required_settings(config)
+
+
 @pytest.mark.parametrize(
     ("setting", "override"),
     [

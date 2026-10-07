@@ -16,6 +16,7 @@ from app.routers.auth import (
     LOGIN_ATTEMPT_SCRIPT,
     LOGIN_SUCCESS_SCRIPT,
     _login_client,
+    _login_keys,
     _reserve_login_attempt,
     _release_successful_login,
     _valid_credentials,
@@ -402,26 +403,84 @@ def test_concurrent_guesses_cannot_pass_atomic_reservation(app_settings, monkeyp
     assert len(verified) == 10
 
 
-def test_login_only_accepts_client_ip_from_identified_gateway(monkeypatch):
+def test_local_login_ignores_forwarded_client_headers(app_settings, monkeypatch):
     monkeypatch.setattr("app.routers.auth._gateway_addresses", lambda: {"10.0.0.3"})
 
-    def request(peer, real_ip):
+    def request(peer, real_ip, proto=None, duplicate=False):
         headers = [(b"x-forwarded-for", b"198.51.100.90")]
         if real_ip is not None:
             headers.append((b"x-real-ip", real_ip.encode()))
+            if duplicate:
+                headers.append((b"x-real-ip", b"198.51.100.99"))
+        if proto is not None:
+            headers.append((b"x-forwarded-proto", proto.encode()))
         return Request({"type": "http", "headers": headers, "client": (peer, 1234)})
 
-    assert _login_client(request("10.0.0.3", "198.51.100.10")) == "198.51.100.10"
+    assert _login_client(request("10.0.0.3", "198.51.100.10")) == "10.0.0.3"
+    assert _login_client(request("10.0.0.3", "198.51.100.99", proto="https")) == "10.0.0.3"
     assert _login_client(request("10.0.0.4", "198.51.100.10")) == "10.0.0.4"
-    for header in (None, "forged.example", "198.51.100.10, 198.51.100.11"):
-        with pytest.raises(HTTPException) as error:
-            _login_client(request("10.0.0.3", header))
-        assert error.value.status_code == 503
+    for header in (
+        None,
+        "forged.example",
+        "999.999.999.999",
+        "198.51.100.10, 198.51.100.11",
+    ):
+        assert _login_client(request("10.0.0.3", header)) == "10.0.0.3"
+    assert _login_client(request("10.0.0.3", "198.51.100.10", duplicate=True)) == "10.0.0.3"
 
     monkeypatch.setattr("app.routers.auth._gateway_addresses", lambda: set())
     with pytest.raises(HTTPException) as error:
         _login_client(request("10.0.0.3", "198.51.100.10"))
     assert error.value.status_code == 503
+
+
+def test_public_login_requires_https_gateway_and_uses_distinct_client_quotas(app_settings, monkeypatch):
+    app_settings.RADAR_ALLOWED_ORIGINS = "https://radar.example.com"
+    app_settings.RADAR_COOKIE_SECURE = True
+    monkeypatch.setattr("app.routers.auth._gateway_addresses", lambda: {"10.0.0.3"})
+
+    def request(peer, real_ip, proto="https", forwarded_for="203.0.113.200", duplicate=False):
+        headers = [(b"x-forwarded-for", forwarded_for.encode())]
+        if real_ip is not None:
+            headers.append((b"x-real-ip", real_ip.encode()))
+            if duplicate:
+                headers.append((b"x-real-ip", b"198.51.100.99"))
+        if proto is not None:
+            headers.append((b"x-forwarded-proto", proto.encode()))
+        return Request({
+            "type": "http",
+            "client": (peer, 1234),
+            "headers": headers,
+        })
+
+    first = _login_client(request("10.0.0.3", "198.51.100.10"))
+    second = _login_client(request("10.0.0.3", "198.51.100.11"))
+    assert first != second
+    assert _login_client(request("10.0.0.3", "2001:db8::10")) == "2001:db8::10"
+    assert _login_client(request("10.0.0.3", "198.51.100.10", forwarded_for="198.51.100.99")) == first
+
+    redis = FakeRedis()
+    for index in range(30):
+        client_key, username_key = _login_keys(f"invented-{index}", first)
+        assert asyncio.run(_reserve_login_attempt(redis, client_key, username_key)) is not None
+    client_key, username_key = _login_keys("invented-30", first)
+    assert asyncio.run(_reserve_login_attempt(redis, client_key, username_key)) is None
+    client_key, username_key = _login_keys("invented-30", second)
+    assert asyncio.run(_reserve_login_attempt(redis, client_key, username_key)) is not None
+
+    for bad_request in (
+        request("10.0.0.4", "198.51.100.12"),
+        request("10.0.0.3", "198.51.100.12", proto=None),
+        request("10.0.0.3", "198.51.100.12", proto="http"),
+        request("10.0.0.3", "198.51.100.12", proto="https,http"),
+        request("10.0.0.3", None),
+        request("10.0.0.3", "999.999.999.999"),
+        request("10.0.0.3", "198.51.100.12, 198.51.100.13"),
+        request("10.0.0.3", "198.51.100.12", duplicate=True),
+    ):
+        with pytest.raises(HTTPException) as error:
+            _login_client(bad_request)
+        assert error.value.status_code == 503
 
 
 def test_unknown_usernames_use_decoy_password_work(app_settings, monkeypatch):

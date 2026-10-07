@@ -23,7 +23,8 @@ docker compose version >/dev/null
 "${COMPOSE[@]}" config --quiet
 case "$ACTION" in
   check)
-    printf 'Compose configuration is valid; services have not been started.\n'
+    printf 'Compose syntax and required interpolation are valid; services have not been started.\n'
+    printf 'Application security settings are checked at API startup, not by this command.\n'
     ;;
   up)
     docker info >/dev/null

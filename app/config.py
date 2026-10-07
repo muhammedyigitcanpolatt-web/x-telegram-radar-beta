@@ -113,6 +113,34 @@ def _is_example_secret(value: str | None) -> bool:
     return bool(value and value.strip().upper().startswith("REPLACE_"))
 
 
+def _browser_origin_scheme(origin: str) -> str | None:
+    """Accept only exact browser origins; plain HTTP is restricted to loopback."""
+    try:
+        parsed = urlparse(origin)
+        # Reading port also rejects malformed values such as https://host:bad.
+        parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not origin.startswith(f"{parsed.scheme}://")
+        or not parsed.netloc
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    if parsed.scheme == "http" and parsed.hostname not in {
+        "localhost", "127.0.0.1", "::1"
+    }:
+        return None
+    return parsed.scheme
+
+
 def validate_required_settings(config: Settings = settings) -> None:
     missing = []
     if not config.POSTGRES_USER:
@@ -123,21 +151,30 @@ def validate_required_settings(config: Settings = settings) -> None:
         config.RADAR_SESSION_SECRET
     ):
         missing.append("RADAR_SESSION_SECRET (at least 32 characters)")
-    if not config.RADAR_INGEST_API_KEY or _is_example_secret(
+    if len(config.RADAR_INGEST_API_KEY) < 32 or _is_example_secret(
         config.RADAR_INGEST_API_KEY
     ):
-        missing.append("RADAR_INGEST_API_KEY")
+        missing.append("RADAR_INGEST_API_KEY (at least 32 characters)")
     if _is_example_secret(config.NEO4J_PASSWORD):
         missing.append("NEO4J_PASSWORD")
     clickhouse_password = unquote(urlparse(config.CLICKHOUSE_URL).password or "")
     if _is_example_secret(clickhouse_password):
         missing.append("CLICKHOUSE_PASSWORD")
+    origins = config.allowed_origins
+    schemes = [_browser_origin_scheme(origin) for origin in origins]
+    if not origins or None in schemes:
+        missing.append("RADAR_ALLOWED_ORIGINS (valid HTTPS origins or loopback HTTP only)")
+    elif "https" in schemes:
+        if "http" in schemes:
+            missing.append("RADAR_ALLOWED_ORIGINS (do not mix HTTPS and HTTP)")
+        if not config.RADAR_COOKIE_SECURE:
+            missing.append("RADAR_COOKIE_SECURE (true for HTTPS origins)")
     if config.SIEM_EXPORT_ENABLED:
         parsed = urlparse(config.SIEM_WEBHOOK_URL or "")
         if parsed.scheme != "https" or not parsed.netloc:
             missing.append("SIEM_WEBHOOK_URL (HTTPS required when export is enabled)")
     if missing:
         raise RuntimeError(
-            "Required secure settings are missing or contain example values: "
+            "Required secure settings are missing or unsafe: "
             + ", ".join(missing)
         )

@@ -170,9 +170,13 @@ services:
   gateway:
     image: nginx:1.30.5-alpine
     restart: unless-stopped
+    environment:
+      RADAR_ALLOWED_ORIGINS: ${RADAR_ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+      RADAR_EDGE_SHARED_SECRET: ${RADAR_EDGE_SHARED_SECRET:-}
     ports: ["127.0.0.1:8080:8080"]
     volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx.conf:/etc/nginx/templates/default.conf.template:ro
+      - ./gateway.envsh:/docker-entrypoint.d/18-radar-host-gateway.envsh:ro
     networks: [application]
     depends_on:
       fastapi_api: {condition: service_healthy}

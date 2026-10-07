@@ -1,0 +1,88 @@
+#!/bin/sh
+# Sourced by the official nginx entrypoint before it renders nginx.conf.
+# The gateway has only the application bridge network; its default route is
+# the host's bridge peer, which is the sole trusted TLS edge connection.
+if ! command -v ip >/dev/null 2>&1; then
+    echo "Gateway cannot determine its Docker host peer: ip command is missing." >&2
+    exit 1
+fi
+
+if ! radar_default_routes="$(ip -4 route show default 2>/dev/null)"; then
+    echo "Gateway cannot read its Docker default route; refusing to start." >&2
+    exit 1
+fi
+if ! RADAR_HOST_GATEWAY_IP="$(printf '%s\n' "$radar_default_routes" | awk '
+    $1 == "default" && $2 == "via" {
+        gateways++
+        count = split($3, octet, ".")
+        if (count != 4) exit 1
+        for (i = 1; i <= 4; i++) {
+            if (octet[i] !~ /^[0-9]+$/ || octet[i] + 0 > 255) exit 1
+        }
+        gateway = $3
+    }
+    END {
+        if (gateways != 1) exit 1
+        print gateway
+    }
+')"; then
+    echo "Gateway has no single valid Docker host peer; refusing to start." >&2
+    exit 1
+fi
+if [ -z "$RADAR_HOST_GATEWAY_IP" ]; then
+    echo "Gateway cannot determine its Docker host peer; refusing to start." >&2
+    exit 1
+fi
+export RADAR_HOST_GATEWAY_IP
+
+# Enable forwarded client identity only for an all-HTTPS origin list. Local
+# loopback HTTP ignores forwarded headers even if a host caller forges them.
+if [ -z "${RADAR_ALLOWED_ORIGINS:-}" ]; then
+    echo "Gateway requires RADAR_ALLOWED_ORIGINS; refusing to start." >&2
+    exit 1
+fi
+if ! RADAR_PUBLIC_HTTPS="$(printf '%s\n' "$RADAR_ALLOWED_ORIGINS" | awk -F, '
+    {
+        if (NF < 1) exit 1
+        for (i = 1; i <= NF; i++) {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i)
+            if ($i ~ /^https:\/\//) current = "1"
+            else if ($i ~ /^http:\/\//) current = "0"
+            else exit 1
+            if (mode != "" && current != mode) exit 1
+            mode = current
+        }
+        if (mode == "") exit 1
+        print mode
+    }
+')"; then
+    echo "Gateway requires one consistent HTTP loopback or HTTPS origin mode." >&2
+    exit 1
+fi
+if [ "$RADAR_PUBLIC_HTTPS" != "0" ] && [ "$RADAR_PUBLIC_HTTPS" != "1" ]; then
+    echo "Gateway could not determine origin mode; refusing to start." >&2
+    exit 1
+fi
+export RADAR_PUBLIC_HTTPS
+
+RADAR_EDGE_SHARED_SECRET="${RADAR_EDGE_SHARED_SECRET:-}"
+if [ "$RADAR_PUBLIC_HTTPS" = "1" ]; then
+    if [ "${#RADAR_EDGE_SHARED_SECRET}" -ne 64 ]; then
+        echo "Gateway requires a 64-character edge secret in HTTPS mode." >&2
+        exit 1
+    fi
+    case "$RADAR_EDGE_SHARED_SECRET" in
+        *[!0123456789abcdef]*)
+            echo "Gateway edge secret must be lowercase hexadecimal." >&2
+            exit 1
+            ;;
+    esac
+    if [ "$RADAR_EDGE_SHARED_SECRET" = "0000000000000000000000000000000000000000000000000000000000000000" ]; then
+        echo "Gateway requires a unique edge secret in HTTPS mode." >&2
+        exit 1
+    fi
+else
+    # Never interpolate an unvalidated optional value into local Nginx config.
+    RADAR_EDGE_SHARED_SECRET=0000000000000000000000000000000000000000000000000000000000000000
+fi
+export RADAR_EDGE_SHARED_SECRET

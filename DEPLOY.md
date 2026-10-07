@@ -26,6 +26,8 @@ RADAR_INGEST_API_KEY=
 RADAR_USERS_JSON=
 RADAR_COOKIE_SECURE=false
 RADAR_ALLOWED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080
+# Required only for public HTTPS; leave blank for loopback HTTP.
+RADAR_EDGE_SHARED_SECRET=
 # Optional public Mapbox token; rebuild the frontend after changing it.
 NEXT_PUBLIC_MAPBOX_TOKEN=
 # Collection is opt-in; source credentials are needed only for enabled collectors.
@@ -53,7 +55,7 @@ SIEM_EXPORT_ENABLED=false
 SIEM_WEBHOOK_URL=
 ```
 
-Fill every required blank value before starting services. Generate each password independently with `openssl rand -hex 32`. Use only hexadecimal characters for the ClickHouse password because it appears in a URL. Surround the generated `RADAR_USERS_JSON` value with single quotes to prevent Compose from reinterpreting `$` signs in the PBKDF2 hash. Do not `source` this file from a shell. On Unix-like hosts, run `chmod 600 .env`; on Windows, restrict the file ACL to the deployment account and administrators.
+Fill every required blank value before starting services. Generate each password and the ingest key independently with `openssl rand -hex 32`; the ingest key must contain at least 32 characters. Use only hexadecimal characters for the ClickHouse password because it appears in a URL. Surround the generated `RADAR_USERS_JSON` value with single quotes to prevent Compose from reinterpreting `$` signs in the PBKDF2 hash. Do not `source` this file from a shell. On Unix-like hosts, run `chmod 600 .env`; on Windows, restrict the file ACL to the deployment account and administrators.
 
 If you use the map layer, set `NEXT_PUBLIC_MAPBOX_TOKEN` to a public Mapbox access token. It is passed to the frontend during `docker compose build` and is visible in the browser bundle. Run `bash deploy.sh up` to rebuild after changing it. An empty value leaves the regional list available without a map layer.
 
@@ -88,7 +90,7 @@ bash deploy.sh status
 
 To use another environment file: `RADAR_ENV_FILE=/absolute/path/.env bash deploy.sh up`. `up` builds first, waits with Compose `--wait`, then checks frontend and API HTTP access through the gateway. Failures return a nonzero status. `check` only validates configuration and starts no services. Plain `docker compose config` output may reveal secrets; use `config --quiet` for validation.
 
-Ready and HTTP-reachable do not prove live-account collection, AI accuracy, or end-to-end archive transfer. Sign in and separately verify an authorized sample data flow.
+Ready and HTTP-reachable do not prove live-account collection, AI accuracy, or end-to-end archive transfer. Sign in and separately verify an authorized sample data flow. `check` validates Compose configuration only; the API validates origin, cookie, and ingest-key security settings when the service starts.
 
 Logs and stop:
 
@@ -130,12 +132,67 @@ Image enrichment downloads only HTTP/80 or HTTPS/443 raster images that resolve 
 The manually callable COMINT job has no real audio transcription integration; it returns `unavailable` without storing sample transcripts or audio fingerprints. The experimental IMINT job reads local images up to 5 MiB and does not write a `(0,0)` location when the model's proposed region is absent from the reference matrix. Registration of these jobs does not establish validated production audio or geolocation analysis.
 `tasks.run_predictive_anomalies` is absent from the Beat schedule. Its old Z-score-derived percentage is not calibrated as a real threat probability, so even manual calls now return `unavailable` without a ClickHouse query or PostgreSQL alert record. Old `predictive_early_warnings` rows are retained but are not displayed as active alerts without validation.
 ## HTTPS access for a public beta
-Use the same Compose stack. Install a certificate-backed reverse proxy on the host and forward it to the loopback gateway; **do not expose port 8080 directly to the internet**. Preserve the `Host`, `X-Forwarded-Proto: https`, and WebSocket Upgrade/Connection headers. Set `.env` for your actual domain:
+Use the same Compose stack. Install a certificate-backed reverse proxy on the Docker host and forward it to the loopback gateway; **do not expose port 8080 directly to the internet**. The gateway discovers its single application-network default-route peer at startup and accepts a forwarded client IP only from that exact host bridge address. Its startup fails if it cannot identify that peer. Set `.env` for your actual domain:
 ```dotenv
 RADAR_COOKIE_SECURE=true
 RADAR_ALLOWED_ORIGINS=https://radar.example.com
+RADAR_EDGE_SHARED_SECRET=<fresh-64-character-lowercase-hex-value>
 ```
-The domain is illustrative; DNS and certificates are not configured automatically. Sign in only through the actual HTTPS address in this mode. `RADAR_COOKIE_SECURE=false` is for loopback HTTP only. The extension's current host permissions cover only loopback dashboard addresses; this package does not grant remote HTTPS extension access.
+Generate the edge secret independently with `openssl rand -hex 32`; put the same exact value in the host proxy configuration below. The gateway refuses to start in HTTPS mode if it is absent or malformed. Local loopback HTTP does not require it. The domain is illustrative; DNS and certificates are not configured automatically. Sign in only through the actual HTTPS address in this mode. `RADAR_COOKIE_SECURE=false` is for loopback HTTP only. The extension's current host permissions cover only loopback dashboard addresses; this package does not grant remote HTTPS extension access.
+
+For a host Nginx edge receiving direct client connections, the following is a starting configuration inside its `http` context. Replace the domain and certificate paths, then validate the host configuration and certificate before enabling it. The `X-Forwarded-For` header **overwrites** any client-supplied value with one IP literal; do not append `$proxy_add_x_forwarded_for`. The login rate limit is per edge-visible client IP, and the application keeps its own 15-minute login quotas.
+
+```nginx
+map $http_upgrade $radar_connection_upgrade {
+    default upgrade;
+    '' close;
+}
+limit_req_zone $binary_remote_addr zone=radar_login:10m rate=10r/m;
+
+server {
+    listen 80;
+    server_name radar.example.com;
+    return 308 https://$host$request_uri;
+}
+server {
+    listen 443 ssl;
+    server_name radar.example.com;
+    ssl_certificate /path/to/fullchain.pem;
+    ssl_certificate_key /path/to/privkey.pem;
+    limit_req_status 429;
+
+    location = /api/v1/auth/login {
+        limit_req zone=radar_login burst=5 nodelay;
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Radar-Edge-Secret REPLACE_WITH_THE_SAME_64_HEX;
+    }
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Radar-Edge-Secret REPLACE_WITH_THE_SAME_64_HEX;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $radar_connection_upgrade;
+        proxy_read_timeout 3600s;
+    }
+}
+```
+
+If a CDN or another trusted proxy sits before this host Nginx, `$remote_addr` is that proxy's IP until you configure Nginx's real-IP module for its exact trusted address ranges. Otherwise users will still share a rate-limit bucket. Reject or overwrite untrusted forwarding and edge-secret headers at the first public edge; do not trust arbitrary client-supplied values. The gateway consumes the edge-secret header and removes it before forwarding to API or frontend. Protect the host Nginx configuration and `.env`: both contain the edge secret, and `nginx -T` can print configuration values. Verify with two independent client IPs that login quotas stay separate, and confirm the resulting browser cookie has the `Secure` flag.
+
+The application rejects public HTTP origins, mixed HTTPS and loopback HTTP origins, and an HTTPS origin with `RADAR_COOKIE_SECURE=false` at startup. Set `RADAR_ALLOWED_ORIGINS` to one or more exact HTTPS origins, without paths or trailing slashes. These checks do not install certificates, verify the host reverse proxy, or make the dashboard safe to publish by themselves.
+
+If a credential from the old private repository history is still active, rotate it before exposing this installation:
+
+1. Rotate PostgreSQL, Neo4j, and ClickHouse account passwords in the existing services and then update `.env` together. Changing `.env` alone does not rotate credentials already stored in database volumes.
+2. Replace `RADAR_SESSION_SECRET` and any legacy `RADAR_SECRET_KEY` still used by an older installation, plus `RADAR_INGEST_API_KEY` and any reused `RADAR_EDGE_SHARED_SECRET`. Replacing the current session secret invalidates active sessions; update ingest clients at the same time as the ingest key, and update the host proxy together with the edge secret.
+3. Revoke and reissue any reused X and Telegram session, API, bot, and bearer credentials at their providers; update only the server-side environment. Rotate any reused proxy URL credentials and SIEM webhook token or URL at their issuers too.
+4. Restart affected services and verify old credentials no longer authenticate. Never copy an old `.env` into the public repository or paste secret values into an issue, log, or support request.
 
 ## Upgrades and existing data
 

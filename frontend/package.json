@@ -31,7 +31,7 @@
     "@types/react-dom": "^18.2.0",
     "@types/mapbox-gl": "^3.1.0",
     "eslint": "^8.57.0",
-    "eslint-config-next": "15.5.27",
+    "eslint-config-next": "14.2.35",
     "postcss": "8.5.28",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.4.0"
@@ -40,6 +40,10 @@
     "node": ">=20.9.0"
   },
   "overrides": {
-    "postcss": "$postcss"
+    "postcss": "$postcss",
+    "@next/eslint-plugin-next": {
+      "glob": "10.5.0"
+    },
+    "eslint-plugin-react-hooks": "4.6.2"
   }
 }

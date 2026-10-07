@@ -48,8 +48,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install locked dependencies
         run: npm ci
-      - name: Audit runtime dependencies
-        run: npm audit --omit=dev
+      - name: Audit all dependencies
+        run: npm audit
       - name: Typecheck
         run: npm run typecheck
       - name: Lint
@@ -72,3 +72,13 @@ jobs:
           package-manager-cache: false
       - name: Test extension
         run: node --test extension/tests/*.test.cjs
+
+  gateway:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Test trusted proxy identity
+        run: bash tests/gateway_proxy_smoke.sh

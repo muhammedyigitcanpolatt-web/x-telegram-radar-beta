@@ -1,12 +1,12 @@
 # X + Telegram Radar
 
-**Public beta — v0.1.0-beta.1.** A self-hosted interface for optional collection, analysis, analyst review, and alerts from X and Telegram sources. The stack uses FastAPI, Redis, PostgreSQL/pgvector, Neo4j, ClickHouse, and Next.js. Source collection, SIEM export, and public blockchain lookups are disabled by default.
+**Public beta — v0.1.0-beta.2.** A self-hosted interface for optional collection, analysis, analyst review, and alerts from X and Telegram sources. The stack uses FastAPI, Redis, PostgreSQL/pgvector, Neo4j, ClickHouse, and Next.js. Source collection, SIEM export, and public blockchain lookups are disabled by default.
 
 This beta has been checked with local fixtures and isolated Docker services. Live social accounts, real user data, production migration, and a public deployment have not been verified. Analysis results require human review; they are not confirmed threat findings.
 
 ## Supported setup
 
-The supported deployment uses the root [`docker-compose.yml`](docker-compose.yml) and [`deploy.sh`](deploy.sh). [`docker-compose.prod.yml`](docker-compose.prod.yml) is a compatibility entry point for the same stack; do not combine both Compose files with `-f`. Copy [`.env.example`](.env.example) to `.env`, then complete the required secrets, user password hash, and Docker/Compose prerequisites in [DEPLOY.md](DEPLOY.md). Follow its HTTPS section before exposing the dashboard to the internet.
+The supported deployment uses the root [`docker-compose.yml`](docker-compose.yml) and [`deploy.sh`](deploy.sh). [`docker-compose.prod.yml`](docker-compose.prod.yml) is a compatibility entry point for the same stack; do not combine both Compose files with `-f`. Copy [`.env.example`](.env.example) to `.env`, then complete the required secrets, user password hash, and Docker/Compose prerequisites in [DEPLOY.md](DEPLOY.md). Public HTTPS access requires the trusted host proxy, a unique edge secret, and secure cookies described there.
 
 ```bash
 bash deploy.sh check

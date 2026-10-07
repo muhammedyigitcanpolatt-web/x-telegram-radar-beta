@@ -2,6 +2,7 @@ import hashlib
 import ipaddress
 import secrets
 import socket
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -79,14 +80,25 @@ def _login_client(request: Request) -> str:
     if not peer:
         raise HTTPException(status_code=503, detail="Client identity unavailable")
     gateway_addresses = _gateway_addresses()
-    if not gateway_addresses and "x-real-ip" in request.headers:
-        # Compose gateway always supplies this header. DNS failure must not
-        # silently merge visitors into one transport-peer bucket.
-        raise HTTPException(status_code=503, detail="Client identity unavailable")
-    if peer not in gateway_addresses:
-        # Headers sent directly to the API are never used for rate limiting.
+    public_https = any(urlparse(origin).scheme == "https" for origin in settings.allowed_origins)
+    if not public_https:
+        # Loopback HTTP has one shared host peer. Ignore all forwarding headers
+        # so a local caller cannot manufacture fresh rate-limit buckets.
+        if not gateway_addresses and "x-real-ip" in request.headers:
+            raise HTTPException(status_code=503, detail="Client identity unavailable")
         return peer
-    supplied = request.headers.get("x-real-ip", "")
+
+    # A public deployment must reach the API through the gateway and the host
+    # TLS edge. Otherwise the host peer would be a shared quota key.
+    if (
+        peer not in gateway_addresses
+        or request.headers.get("x-forwarded-proto") != "https"
+    ):
+        raise HTTPException(status_code=503, detail="Client identity unavailable")
+    supplied_headers = request.headers.getlist("x-real-ip")
+    if len(supplied_headers) != 1:
+        raise HTTPException(status_code=503, detail="Client identity unavailable")
+    supplied = supplied_headers[0]
     try:
         return str(ipaddress.ip_address(supplied))
     except ValueError as exc:
